@@ -1,0 +1,15 @@
+{
+  "name": "wcap-voice",
+  "version": "1.0.0",
+  "description": "wcap screen recorder with mic noise suppression and voice enhancer",
+  "main": "main.js",
+  "author": "wcap",
+  "scripts": { "start": "electron .", "dist": "electron-builder --win portable --x64" },
+  "devDependencies": { "electron": "33.2.1", "electron-builder": "25.1.8" },
+  "build": {
+    "appId": "local.wcap.voice",
+    "productName": "wcap-voice",
+    "files": ["main.js", "preload.js", "index.html"],
+    "win": { "target": "portable", "artifactName": "wcap-voice.exe" }
+  }
+}

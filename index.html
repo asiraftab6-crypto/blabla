@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wcap web</title>
+<style>
+:root{--bg:#f4f5f6;--fg:#15181b;--mut:#5d666e;--pn:#fff;--ln:#d5dade;--ac:#0b7d6e;--rec:#d92d20;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--fg:#e8ebed;--mut:#8d979f;--pn:#1c2024;--ln:#2e353b;--ac:#3cc4ae;--rec:#ff5a4d;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:20px;margin:0 0 2px}p.s{color:var(--mut);margin:0 0 16px}
+.bar{display:flex;gap:12px;align-items:center;background:var(--pn);border:1px solid var(--ln);border-radius:10px;padding:14px;margin-bottom:14px}
+#rec{width:64px;height:64px;border-radius:50%;border:3px solid var(--ln);background:var(--pn);cursor:pointer;display:grid;place-items:center;flex:none}
+#rec i{width:26px;height:26px;border-radius:50%;background:var(--rec);transition:.15s}
+#rec.on i{border-radius:5px;width:22px;height:22px}#rec:focus-visible{outline:3px solid var(--ac);outline-offset:2px}
+#time{font:600 22px ui-monospace,Consolas,monospace}#st{color:var(--mut);font-size:13px}
+#mt{height:8px;background:var(--ln);border-radius:4px;overflow:hidden;margin-top:6px;width:220px;max-width:100%}#mt b{display:block;height:100%;width:0;background:var(--ac)}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+fieldset{background:var(--pn);border:1px solid var(--ln);border-radius:10px;margin:0;padding:10px 14px 12px}
+legend{font-weight:600;padding:0 6px}label{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:4px 0}
+input[type=number],select{width:120px;background:var(--bg);color:var(--fg);border:1px solid var(--ln);border-radius:6px;padding:4px 6px;font:inherit}
+input[type=checkbox]{width:17px;height:17px;accent-color:var(--ac)}
+video{width:100%;margin-top:14px;border-radius:10px;background:#000;display:none}
+a.dl{display:none;margin-top:12px;font-weight:600;color:var(--ac)}.n{color:var(--mut);font-size:12px;margin-top:14px}
+</style></head><body><main>
+<h1>wcap web</h1><p class="s">Screen recorder with mic noise suppression and voice enhancer. Runs in your browser.</p>
+<div class="bar"><button id="rec" aria-label="Start recording"><i></i></button>
+<div><div id="time">00:00</div><div id="st">Ready. Press Alt+R or the button.</div><div id="mt"><b></b></div></div></div>
+<div class="g">
+<fieldset><legend>Video</legend>
+<label>Codec<select id="codec"></select></label>
+<label>Max width<input type="number" id="w" min="320" step="2"></label>
+<label>Max height<input type="number" id="h" min="240" step="2"></label>
+<label>Max framerate<input type="number" id="fps" min="5" max="120"></label>
+<label>Bitrate (kbit/s)<input type="number" id="vb" min="500" step="500"></label></fieldset>
+<fieldset><legend>Audio</legend>
+<label>Capture system audio<input type="checkbox" id="sys"></label>
+<label>Capture microphone<input type="checkbox" id="mic"></label>
+<label>Microphone gain (%)<input type="number" id="gain" min="0" max="500"></label>
+<label>Mic noise suppression<input type="checkbox" id="ns"></label>
+<label>Mic voice enhancer<input type="checkbox" id="en"></label>
+<label>Bitrate (kbit/s)<input type="number" id="ab" min="64" step="32"></label></fieldset></div>
+<video id="pv" controls></video><a class="dl" id="dl">Save recording</a>
+<p class="n">Pick a screen, window or tab in the browser dialog. Tick "Share audio" there to record system audio. Global hotkey: Ctrl+Shift+R starts and stops recording from any app.</p>
+</main>
+<script id="wk" type="text/plain">
+const PI=Math.PI,N=512,H=256,B=257;
+function bq(t,f,q,db){const w=2*PI*f/sampleRate,c=Math.cos(w),s=Math.sin(w),A=Math.pow(10,db/40);let b0,b1,b2,a0,a1,a2,al;
+if(t=='hp'){al=s/(2*q);b0=(1+c)/2;b1=-(1+c);b2=b0;a0=1+al;a1=-2*c;a2=1-al}
+else if(t=='pk'){al=s/(2*q);b0=1+al*A;b1=-2*c;b2=1-al*A;a0=1+al/A;a1=-2*c;a2=1-al/A}
+else{al=s*.5*Math.SQRT2;const T=2*Math.sqrt(A)*al;b0=A*((A+1)+(A-1)*c+T);b1=-2*A*((A-1)+(A+1)*c);b2=A*((A+1)+(A-1)*c-T);a0=(A+1)-(A-1)*c+T;a1=2*((A-1)-(A+1)*c);a2=(A+1)-(A-1)*c-T}
+return{b0:b0/a0,b1:b1/a0,b2:b2/a0,a1:a1/a0,a2:a2/a0,z1:0,z2:0}}
+function run(f,x){const y=f.b0*x+f.z1;f.z1=f.b1*x-f.a1*y+f.z2;f.z2=f.b2*x-f.a2*y;return y}
+class VP extends AudioWorkletProcessor{
+constructor(o){super();const p=o.processorOptions;this.ns=p.ns;this.en=p.en;this.gain=p.gain;const co=s=>1-Math.exp(-1/(s*sampleRate));
+this.ea=co(.002);this.er=co(.06);this.go=co(.004);this.gc=co(.12);this.am=co(.4);this.ag=co(.6);this.ad=co(.08);this.ca=co(.008);this.cr=co(.15);this.lr=co(.05);
+this.hp=bq('hp',90,.7071);this.e1=bq('pk',250,.9,-2);this.e2=bq('pk',3000,.9,2.5);this.e3=bq('hs',7000,0,2);
+this.win=new Float32Array(N);this.cs=new Float32Array(N/2);this.sn=new Float32Array(N/2);this.rev=new Uint16Array(N);
+for(let i=0;i<N;i++){this.win[i]=Math.sqrt(.5-.5*Math.cos(2*PI*i/N));let r=0,t=i;for(let l=N;l>1;l>>=1){r=(r<<1)|(t&1);t>>=1}this.rev[i]=r}
+for(let i=0;i<N/2;i++){this.cs[i]=Math.cos(2*PI*i/N);this.sn[i]=Math.sin(2*PI*i/N)}
+const F=n=>new Float32Array(n);this.re=F(N);this.im=F(N);this.fr=F(N);this.ola=F(N);this.hop=F(H);this.hf=0;
+this.ps=F(B);this.nz=F(B);this.gp=F(B).fill(1);this.mp=F(B).fill(1);this.init=false;this.oq=F(8192);this.qr=0;this.qw=H;
+this.ge=0;this.gg=1;this.ams=1e-6;this.agc=4;this.ce=0;this.lim=1;this.vad=false}
+fft(inv){const re=this.re,im=this.im;for(let i=0;i<N;i++){const j=this.rev[i];if(j>i){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t}}
+for(let len=2;len<=N;len<<=1){const h=len>>1,st=N/len;for(let i=0;i<N;i+=len)for(let j=0;j<h;j++){const wr=this.cs[j*st],wi=inv?this.sn[j*st]:-this.sn[j*st],a=i+j,b=a+h,tr=re[b]*wr-im[b]*wi,ti=re[b]*wi+im[b]*wr;re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti}}
+if(inv)for(let i=0;i<N;i++){re[i]/=N;im[i]/=N}}
+frame(){const re=this.re,im=this.im,P=new Float32Array(B);for(let n=0;n<N;n++){re[n]=this.fr[n]*this.win[n];im[n]=0}this.fft(false);
+for(let k=0;k<B;k++)P[k]=re[k]*re[k]+im[k]*im[k];
+if(!this.init){for(let k=0;k<B;k++){this.ps[k]=this.nz[k]=P[k]}this.init=true}
+let sp=0,sn=0;for(let k=0;k<B;k++){this.ps[k]=.7*this.ps[k]+.3*P[k];if(k>=3&&k<100){sp+=this.ps[k];sn+=this.nz[k]}}
+const speech=sp>3*sn;this.vad=speech;const rise=speech?1.0005:1.004;
+for(let k=0;k<B;k++){if(this.ps[k]<this.nz[k])this.nz[k]+=.25*(this.ps[k]-this.nz[k]);else this.nz[k]=Math.min(this.nz[k]*rise,this.ps[k])}
+const G=new Float32Array(B);for(let k=0;k<B;k++){const g=P[k]/(this.nz[k]*2+1e-12),xi=.96*this.gp[k]*this.gp[k]*this.mp[k]+.04*Math.max(g-1,0);G[k]=Math.max(xi/(1+xi),.07);this.mp[k]=g}
+for(let k=0;k<B;k++){const g=k==0||k==B-1?G[k]:.25*G[k-1]+.5*G[k]+.25*G[k+1];this.gp[k]=g;re[k]*=g;im[k]*=g;if(k>0&&k<N/2){re[N-k]*=g;im[N-k]*=g}}
+this.fft(true);for(let n=0;n<N;n++)this.ola[n]+=re[n]*this.win[n];
+for(let n=0;n<H;n++){this.oq[this.qw++&8191]=this.post(this.ola[n])}
+this.ola.copyWithin(0,H);this.ola.fill(0,N-H)}
+post(x){const ax=Math.abs(x);this.ge+=(ax>this.ge?this.ea:this.er)*(ax-this.ge);
+if(this.ns){let t=1;if(this.ge<4e-4)t=Math.max(this.ge/4e-4,.35);this.gg+=(t>this.gg?this.go:this.gc)*(t-this.gg);x*=this.gg}
+if(this.en){const act=this.ns?(this.vad&&this.ge>1.5e-4):this.ge>8e-4;
+if(act){this.ams+=this.am*(x*x-this.ams);const w=Math.min(40,Math.max(.6,.12/Math.sqrt(this.ams+1e-10)));this.agc+=(w<this.agc?this.ad:this.ag)*(w-this.agc)}
+x*=this.agc;x=run(this.e3,run(this.e2,run(this.e1,x)));
+const a=Math.abs(x);this.ce+=(a>this.ce?this.ca:this.cr)*(a-this.ce);let gc=1;if(this.ce>.126)gc=Math.pow(this.ce/.126,-.6667);x*=gc*1.4}
+x*=this.gain;const ap=Math.abs(x),need=ap>.95?.95/ap:1;
+if(need<this.lim)this.lim=need;else{this.lim+=this.lr*(1-this.lim);if(this.lim>need)this.lim=need}
+return x*this.lim}
+process(ins,outs){const i0=ins[0][0],o=outs[0];if(!i0){return true}const out=o[0];
+for(let i=0;i<i0.length;i++){const x=run(this.hp,i0[i]+1e-20);
+if(!this.ns){out[i]=this.post(x);continue}
+this.hop[this.hf++]=x;if(this.hf==H){this.hf=0;this.fr.copyWithin(0,H);this.fr.set(this.hop,N-H);this.frame()}
+out[i]=this.oq[this.qr++&8191]}
+for(let c=1;c<o.length;c++)o[c].set(out);return true}}
+registerProcessor('vp',VP)
+</script>
+<script>
+const $=i=>document.getElementById(i);
+const D={codec:'',w:1920,h:1080,fps:60,vb:8000,sys:true,mic:true,gain:100,ns:true,en:true,ab:160};
+let C=Object.assign({},D);try{Object.assign(C,JSON.parse(localStorage.getItem('wcap')||'{}'))}catch(e){}
+const TYPES=['video/mp4;codecs=avc1,mp4a.40.2','video/webm;codecs=av1,opus','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+const sup=TYPES.filter(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t));
+$('codec').innerHTML=sup.map(t=>`<option value="${t}">${t.split(';')[0].split('/')[1].toUpperCase()} ${t.includes('avc1')?'(H.264)':t.includes('av1')?'(AV1)':t.includes('vp9')?'(VP9)':t.includes('vp8')?'(VP8)':''}</option>`).join('');
+if(!sup.includes(C.codec))C.codec=sup[0]||'';
+const F=['codec','w','h','fps','vb','sys','mic','gain','ns','en','ab'];
+function load(){F.forEach(k=>{const e=$(k);e.type=='checkbox'?e.checked=C[k]:e.value=C[k]})}
+function save(){F.forEach(k=>{const e=$(k);C[k]=e.type=='checkbox'?e.checked:e.type=='number'?(+e.value||D[k]):e.value});try{localStorage.setItem('wcap',JSON.stringify(C))}catch(e){}}
+load();F.forEach(k=>$(k).addEventListener('change',save));
+let S=null,tick=null;
+const st=m=>$('st').textContent=m;
+async function start(){save();let disp,mic,ac;
+try{
+disp=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:C.fps,max:C.fps},width:{max:C.w},height:{max:C.h}},audio:C.sys});
+ac=new AudioContext({sampleRate:48000});
+const url=URL.createObjectURL(new Blob([$('wk').textContent],{type:'text/javascript'}));await ac.audioWorklet.addModule(url);
+const dest=ac.createMediaStreamDestination();let an=null;
+if(disp.getAudioTracks().length)ac.createMediaStreamSource(new MediaStream(disp.getAudioTracks())).connect(dest);
+if(C.mic){mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false,channelCount:1}});
+const node=new AudioWorkletNode(ac,'vp',{numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[1],processorOptions:{ns:C.ns,en:C.en,gain:C.gain/100}});
+ac.createMediaStreamSource(mic).connect(node);node.connect(dest);an=ac.createAnalyser();an.fftSize=1024;node.connect(an)}
+const tracks=[...disp.getVideoTracks(),...dest.stream.getAudioTracks()];
+const rec=new MediaRecorder(new MediaStream(tracks),{mimeType:C.codec||undefined,videoBitsPerSecond:C.vb*1000,audioBitsPerSecond:C.ab*1000});
+const chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+rec.onstop=()=>{const type=rec.mimeType.split(';')[0],b=new Blob(chunks,{type}),u=URL.createObjectURL(b),ext=type.includes('mp4')?'mp4':'webm';
+$('pv').src=u;$('pv').style.display='block';const a=$('dl');a.href=u;a.download='wcap-'+new Date().toISOString().replace(/[:.]/g,'-')+'.'+ext;a.style.display='inline-block';a.textContent='Save recording ('+(b.size/1048576).toFixed(1)+' MB)';
+[disp,mic].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));ac.close();clearInterval(tick);$('rec').classList.remove('on');$('mt').firstChild.style.width='0';S=null;st('Saved. Press record to start again.')};
+disp.getVideoTracks()[0].onended=()=>S&&stop();
+rec.start(1000);const t0=Date.now(),buf=new Float32Array(1024);
+tick=setInterval(()=>{const s=((Date.now()-t0)/1000)|0;$('time').textContent=String(s/60|0).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+if(an){an.getFloatTimeDomainData(buf);let m=0;for(const v of buf)m=Math.max(m,Math.abs(v));$('mt').firstChild.style.width=Math.min(100,m*100)+'%'}},100);
+S={rec};$('rec').classList.add('on');$('pv').style.display='none';$('dl').style.display='none';st('Recording...')
+}catch(e){[disp,mic].forEach(s=>s&&s.getTracks().forEach(t=>t.stop()));ac&&ac.close();st(e.name=='NotAllowedError'?'Permission denied. Allow screen/mic access and try again.':'Cannot start: '+e.message)}}
+function stop(){S&&S.rec.state!='inactive'&&S.rec.stop()}
+$('rec').onclick=()=>S?stop():start();
+if(window.wcapNative)wcapNative.onToggle(()=>$('rec').click());
+addEventListener('keydown',e=>{if(e.altKey&&e.key.toLowerCase()=='r'){e.preventDefault();$('rec').click()}});
+</script></body></html>
